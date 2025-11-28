@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>UB Routing (Leaflet)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<style>#map { height: 92vh; } .ctrl { position:absolute; left:10px; top:10px; background:white; padding:8px; z-index:1000; }</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="ctrl">
+  <div>Start: <span id="startDisplay">-</span></div>
+  <div>Goal: <span id="goalDisplay">-</span></div>
+  <button id="clear">Clear</button>
+  <button id="dijkstra">Dijkstra</button>
+  <button id="bfs">BFS (max 5)</button>
+  <button id="dfs">DFS (max 5)</button>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+const API = "http://localhost:8000";
+const map = L.map('map').setView([47.918, 106.917], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+let start = null, goal = null;
+let startMarker=null, goalMarker=null;
+let nodes = null;
+let pathLayers = [];
+
+async function fetchNodes(){
+  const res = await fetch(API + "/nodes");
+  nodes = await res.json();
+}
+fetchNodes();
+
+function getNearestNode(latlng){
+  if(!nodes) return null;
+  let best = null, bestd=Infinity;
+  nodes.forEach(n=>{
+    const lon = n.coord[0], lat = n.coord[1];
+    const d = (lat - latlng.lat)*(lat - latlng.lat) + (lon - latlng.lng)*(lon - latlng.lng);
+    if(d < bestd){ best = n; bestd = d; }
+  });
+  return best;
+}
+
+map.on('click', e=>{
+  const nearest = getNearestNode(e.latlng);
+  if(!start){ start = nearest.id; startMarker = L.circleMarker([e.latlng.lat,e.latlng.lng],{radius:6}).addTo(map); document.getElementById('startDisplay').textContent = start; }
+  else if(!goal){ goal = nearest.id; goalMarker = L.circleMarker([e.latlng.lat,e.latlng.lng],{radius:6, color:'red'}).addTo(map); document.getElementById('goalDisplay').textContent = goal; }
+});
+
+document.getElementById('clear').onclick = ()=>{ start=null; goal=null; document.getElementById('startDisplay').textContent='-'; document.getElementById('goalDisplay').textContent='-'; if(startMarker) map.removeLayer(startMarker); if(goalMarker) map.removeLayer(goalMarker); pathLayers.forEach(l=>map.removeLayer(l)); pathLayers=[]; };
+
+function drawPath(path, color='blue'){
+  const latlngs = path.map(id=>{
+    const n = nodes.find(x=>x.id===id);
+    return [n.coord[1], n.coord[0]];
+  });
+  const pl = L.polyline(latlngs, {weight:4}).addTo(map);
+  pathLayers.push(pl);
+  map.fitBounds(pl.getBounds());
+}
+
+async function callApi(route){
+  if(start===null || goal===null){ alert("Select start and goal"); return; }
+  const res = await fetch(API + route, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({start, goal, max_paths:5})
+  });
+  if(!res.ok){ const t=await res.text(); alert("Error: "+t); return; }
+  const j = await res.json();
+  return j;
+}
+
+document.getElementById('dijkstra').onclick = async ()=>{
+  const r = await callApi('/shortest-path');
+  if(r) drawPath(r.path, 'red');
+};
+document.getElementById('bfs').onclick = async ()=>{
+  const r = await callApi('/all-paths/bfs');
+  if(r) r.paths.forEach((p,i)=>drawPath(p,(i%2)?'green':'blue'));
+};
+document.getElementById('dfs').onclick = async ()=>{
+  const r = await callApi('/all-paths/dfs');
+  if(r) r.paths.forEach((p,i)=>drawPath(p,(i%2)?'purple':'orange'));
+};
+</script>
+</body>
+</html>
