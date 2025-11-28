@@ -1,4 +1,4 @@
-public class Solution {
+public class d1{
     public int numTrees(int n) {
         int[] dp = new int[n + 1];
         dp[0] = 1; 
